@@ -1,0 +1,10 @@
+मोबाइल से APK बनाने का तरीका (कंप्यूटर की जरूरत नहीं):
+1) GitHub.com पर अकाउंट बनाकर Sign in करें।
+2) New repository बनाएं; नाम CameraApp रखें; Public या Private चुनें; Create repository दबाएं।
+3) Add file > Upload files चुनें। ZIP को सीधे अपलोड न करें। ZIP को पहले Extract करें, फिर उसके अंदर की सभी फाइलें/फोल्डर (app और .github सहित) अपलोड करें। छुपा हुआ .github फोल्डर भी जरूर अपलोड होना चाहिए।
+4) Commit changes दबाएं।
+5) Repository में Actions टैब खोलें। “Build Android APK” workflow चुनें। Run workflow दबाएं।
+6) Build पूरा होने पर workflow run खोलें। नीचे Artifacts में iPhone-Style-Camera-APK डाउनलोड करें।
+7) डाउनलोड ZIP को Extract करें। app-debug.apk खोलकर Install करें। Android पूछे तो Chrome/Files के लिए Install unknown apps अनुमति दें।
+
+नोट: यह debug APK है। कैमरा ऐप का बेसिक CameraX preview/capture है। iPhone की असली computational photography/AI processing का दावा नहीं है। Build में error आए तो Actions की लाल error स्क्रीन भेजें।
