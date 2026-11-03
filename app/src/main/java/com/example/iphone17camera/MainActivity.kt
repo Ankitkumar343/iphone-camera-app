@@ -136,7 +136,7 @@ class MainActivity : AppCompatActivity() {
 
         val note = TextView(this).apply {
             text = "Portrait Blur aur Face Enhance software se hote hain (ML Kit), depth sensor se nahi. " +
-                "In modes mein photo max 2560px tak save hoti hai. Standard mode phone ka maximum resolution use karta hai."
+                "In modes mein photo max 4096px tak save hoti hai. Standard mode phone ka maximum resolution use karta hai."
             textSize = 11f; setTextColor(0xFFB9BBC3.toInt()); gravity = Gravity.CENTER
             setPadding(4, 12, 4, 4)
         }
@@ -230,17 +230,12 @@ class MainActivity : AppCompatActivity() {
                 try {
                     val rotation = image.imageInfo.rotationDegrees
                     val raw = try { image.toBitmap() } finally { image.close() }
-                    var bmp = scaleDown(raw, 2560)
-                    if (rotation != 0) {
-                        val m = Matrix().apply { postRotate(rotation.toFloat()) }
-                        bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
-                    }
                     var note = ""
-                    if (doFace) {
-                        val r = enhanceFaces(bmp)
-                        if (r == null) note = " (chehra nahi mila)" else bmp = r
+                    val bmp = try {
+                        processPhoto(raw, rotation, 4096, doFace, doPortrait) { note = it }
+                    } catch (oom: OutOfMemoryError) {
+                        processPhoto(raw, rotation, 2560, doFace, doPortrait) { note = it }
                     }
-                    if (doPortrait) bmp = portraitBlur(bmp)
                     val ok = saveBitmap(bmp)
                     runOnUiThread {
                         if (ok) {
@@ -260,6 +255,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ---------- Image processing ----------
+
+    private fun processPhoto(
+        raw: Bitmap, rotation: Int, maxDim: Int,
+        doFace: Boolean, doPortrait: Boolean, setNote: (String) -> Unit
+    ): Bitmap {
+        var bmp = scaleDown(raw, maxDim)
+        if (rotation != 0) {
+            val m = Matrix().apply { postRotate(rotation.toFloat()) }
+            bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
+        }
+        if (doFace) {
+            val r = enhanceFaces(bmp)
+            if (r == null) setNote(" (chehra nahi mila)") else bmp = r
+        }
+        if (doPortrait) bmp = portraitBlur(bmp)
+        return bmp
+    }
 
     private fun scaleDown(b: Bitmap, maxDim: Int): Bitmap {
         val longSide = maxOf(b.width, b.height)
