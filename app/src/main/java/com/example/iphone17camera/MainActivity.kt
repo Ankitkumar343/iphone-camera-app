@@ -38,6 +38,8 @@ import com.google.mlkit.vision.face.FaceDetectorOptions
 import com.google.mlkit.vision.segmentation.Segmentation
 import com.google.mlkit.vision.segmentation.selfie.SelfieSegmenterOptions
 import java.util.concurrent.Executors
+import kotlin.math.ln
+import kotlin.math.pow
 
 class MainActivity : AppCompatActivity() {
     private lateinit var previewView: PreviewView
@@ -46,7 +48,7 @@ class MainActivity : AppCompatActivity() {
     private var lens = CameraSelector.LENS_FACING_BACK
     private var provider: ProcessCameraProvider? = null
 
-    // 0 = Standard (max resolution), 1 = Portrait Blur, 2 = Face Enhance, 3 = Both
+    // 0 = iPhone Look, 1 = iPhone Look + Portrait Blur, 2 = Original (no edit, max resolution)
     private var mode = 0
     private val worker = Executors.newSingleThreadExecutor()
 
@@ -103,10 +105,9 @@ class MainActivity : AppCompatActivity() {
         modeSpinner.adapter = ArrayAdapter(
             this, android.R.layout.simple_spinner_dropdown_item,
             listOf(
-                "Standard (Max resolution)",
-                "Portrait Blur",
-                "Face Enhance",
-                "Portrait Blur + Face Enhance"
+                "iPhone Look (recommended)",
+                "iPhone Look + Portrait Blur",
+                "Original (no edit, max resolution)"
             )
         )
         modeSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
@@ -114,10 +115,9 @@ class MainActivity : AppCompatActivity() {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 mode = position
                 status.text = when (position) {
-                    0 -> "Standard mode • phone ka maximum photo resolution"
-                    1 -> "Portrait Blur • background blur hoga"
-                    2 -> "Face Enhance • chehre par smoothing aur brightness"
-                    else -> "Portrait Blur + Face Enhance"
+                    0 -> "iPhone Look • bright, warm, vivid rang + chehre par halki smoothing"
+                    1 -> "iPhone Look + Portrait Blur • background blur"
+                    else -> "Original • bina edit, phone ka maximum resolution"
                 }
             }
         }
@@ -135,8 +135,8 @@ class MainActivity : AppCompatActivity() {
         base.addView(row)
 
         val note = TextView(this).apply {
-            text = "Portrait Blur aur Face Enhance software se hote hain (ML Kit), depth sensor se nahi. " +
-                "In modes mein photo max 4096px tak save hoti hai. Standard mode phone ka maximum resolution use karta hai."
+            text = "iPhone Look aur Portrait Blur software se hote hain (ML Kit), depth sensor ya iPhone ke HDR se nahi. " +
+                "In modes mein photo max 4096px tak save hoti hai. Original mode phone ka maximum resolution use karta hai."
             textSize = 11f; setTextColor(0xFFB9BBC3.toInt()); gravity = Gravity.CENTER
             setPadding(4, 12, 4, 4)
         }
@@ -199,7 +199,7 @@ class MainActivity : AppCompatActivity() {
     private fun takePhoto() {
         val capture = imageCapture ?: run { status.text = "Camera अभी तैयार नहीं है"; return }
 
-        if (mode == 0) {
+        if (mode == 2) {
             val name = "IMG_iPhoneStyle_${System.currentTimeMillis()}.jpg"
             val values = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, name)
@@ -223,8 +223,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         status.text = "Processing... thoda ruko"
-        val doPortrait = mode == 1 || mode == 3
-        val doFace = mode == 2 || mode == 3
+        val doPortrait = mode == 1
+        val doFace = true
         capture.takePicture(worker, object : ImageCapture.OnImageCapturedCallback() {
             override fun onCaptureSuccess(image: ImageProxy) {
                 try {
@@ -270,6 +270,7 @@ class MainActivity : AppCompatActivity() {
             if (r == null) setNote(" (chehra nahi mila)") else bmp = r
         }
         if (doPortrait) bmp = portraitBlur(bmp)
+        bmp = iphoneLook(bmp)
         return bmp
     }
 
@@ -386,6 +387,70 @@ class MainActivity : AppCompatActivity() {
         }
         val result = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         result.setPixels(out, 0, w, 0, 0, w, h)
+        return result
+    }
+
+    /** iPhone-style look: auto brightness, soft contrast, warm tone, vibrance and light sharpening. */
+    private fun iphoneLook(bmp: Bitmap): Bitmap {
+        val w = bmp.width
+        val h = bmp.height
+        val px = IntArray(w * h)
+        bmp.getPixels(px, 0, w, 0, 0, w, h)
+        val bl = IntArray(w * h)
+        blurred(bmp, 2, 3).getPixels(bl, 0, w, 0, 0, w, h)
+
+        var sum = 0.0
+        var n = 0
+        var j = 0
+        while (j < px.size) {
+            val p = px[j]
+            sum += (0.299 * ((p shr 16) and 255) + 0.587 * ((p shr 8) and 255) + 0.114 * (p and 255)) / 255.0
+            n++
+            j += 16
+        }
+        val mean = (sum / maxOf(1, n)).coerceIn(0.05, 0.95)
+        val gamma = (ln(0.50) / ln(mean)).coerceIn(0.65, 1.0).toFloat()
+
+        for (k in px.indices) {
+            val p = px[k]
+            val q = bl[k]
+            var r = ((p shr 16) and 255) / 255f
+            var g = ((p shr 8) and 255) / 255f
+            var b = (p and 255) / 255f
+            val br = ((q shr 16) and 255) / 255f
+            val bg = ((q shr 8) and 255) / 255f
+            val bb = (q and 255) / 255f
+
+            // light sharpening (unsharp mask)
+            r = (r + 0.6f * (r - br)).coerceIn(0f, 1f)
+            g = (g + 0.6f * (g - bg)).coerceIn(0f, 1f)
+            b = (b + 0.6f * (b - bb)).coerceIn(0f, 1f)
+
+            // brighten dark photos
+            r = r.pow(gamma); g = g.pow(gamma); b = b.pow(gamma)
+
+            // contrast + slightly lifted blacks
+            r = (((r - 0.5f) * 1.10f + 0.5f).coerceIn(0f, 1f)) * 0.97f + 0.03f
+            g = (((g - 0.5f) * 1.10f + 0.5f).coerceIn(0f, 1f)) * 0.97f + 0.03f
+            b = (((b - 0.5f) * 1.10f + 0.5f).coerceIn(0f, 1f)) * 0.97f + 0.03f
+
+            // warm tone
+            r = (r * 1.04f).coerceIn(0f, 1f)
+            b = (b * 0.96f).coerceIn(0f, 1f)
+
+            // vibrance: boost dull colours more than already-strong ones
+            val l = 0.299f * r + 0.587f * g + 0.114f * b
+            val sat = maxOf(r, maxOf(g, b)) - minOf(r, minOf(g, b))
+            val boost = 1f + 0.35f * (1f - sat)
+            r = (l + (r - l) * boost).coerceIn(0f, 1f)
+            g = (l + (g - l) * boost).coerceIn(0f, 1f)
+            b = (l + (b - l) * boost).coerceIn(0f, 1f)
+
+            px[k] = (0xFF shl 24) or ((r * 255f + 0.5f).toInt() shl 16) or
+                ((g * 255f + 0.5f).toInt() shl 8) or (b * 255f + 0.5f).toInt()
+        }
+        val result = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        result.setPixels(px, 0, w, 0, 0, w, h)
         return result
     }
 
